@@ -227,9 +227,12 @@ def _function_source(src: str, name: str) -> str:
 
 
 def _function_body(src: str, name: str) -> str:
-    source = _function_source(src, name)
-    brace = source.find("{")
-    return source[brace + 1 : -1]
+    _, params_open = _find_function_declaration(src, name)
+    params_close = _matching_delimiter(src, params_open, "(", ")")
+    brace = src.find("{", params_close)
+    assert brace != -1, f"{name} body not found"
+    close = _matching_delimiter(src, brace, "{", "}")
+    return src[brace + 1 : close]
 
 
 def test_phase0_doc_records_settled_fallback_ownership_matrix():
@@ -275,6 +278,19 @@ def test_function_extractor_matches_exact_declarations_outside_comments():
     assert "return 'comment';" not in body
     assert "return 'prefix';" not in body
     assert "function afterSample" not in body
+
+
+def test_function_extractor_ignores_destructured_parameter_braces():
+    source = """
+    function sample({ fallback = true }){
+      if(anchorOwnedAssistantRawIdxs.has(rawIdx)) return;
+    }
+    """
+
+    body = _function_body(source, "sample")
+
+    assert body.lstrip().startswith("if(anchorOwnedAssistantRawIdxs.has(rawIdx))")
+    assert "fallback = true" not in body
 
 
 def test_transparent_raw_content_helper_is_fallback_only_when_anchor_scene_absent():
