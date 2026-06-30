@@ -333,7 +333,7 @@ def test_validate_id_token_rejects_mismatched_jwk_key_family(monkeypatch):
     monkeypatch.setattr(
         auth_oidc,
         "_get_jwks_document",
-        lambda _jwks_uri: {
+        lambda _jwks_uri, **_kwargs: {
             "keys": [
                 {
                     "kid": "key-1",
@@ -473,8 +473,9 @@ def test_pending_oidc_flows_are_bounded(monkeypatch):
 
     monkeypatch.setattr(auth_oidc, "_MAX_PENDING_FLOWS", 2)
     auth_oidc._pending_flows.clear()
-    auth_oidc._store_pending_flow("old", {"created_at": 1, "nonce": "old"})
-    auth_oidc._store_pending_flow("middle", {"created_at": 2, "nonce": "middle"})
-    auth_oidc._store_pending_flow("new", {"created_at": 3, "nonce": "new"})
+    now = time.time()
+    auth_oidc._store_pending_flow("old", {"created_at": now - 2, "nonce": "old"})
+    auth_oidc._store_pending_flow("middle", {"created_at": now - 1, "nonce": "middle"})
+    auth_oidc._store_pending_flow("new", {"created_at": now, "nonce": "new"})
 
     assert set(auth_oidc._pending_flows) == {"middle", "new"}
