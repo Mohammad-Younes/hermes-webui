@@ -173,6 +173,19 @@ def test_dispatch_stamp_does_not_clobber_newer_picker_model(monkeypatch):
     assert fake_session.model_provider == "openrouter"
 
 
+def test_dispatch_stamp_does_not_clobber_newer_picker_provider_only_choice(monkeypatch):
+    fake_session = FakeSession(model="haiku-4-5", model_provider="openrouter")
+
+    _run_streaming_turn(
+        monkeypatch,
+        fake_session,
+        stream_id="stream-4251-provider-race",
+    )
+
+    assert fake_session.model == "haiku-4-5"
+    assert fake_session.model_provider == "openrouter"
+
+
 def test_dispatch_stamp_persists_resolved_model_when_no_race(monkeypatch):
     fake_session = FakeSession(model="haiku-4-5", model_provider=None)
 
@@ -215,4 +228,32 @@ def test_profile_repair_skips_persistence_when_newer_picker_choice_already_won(m
     )
 
     assert fake_session.model == "opus-4-8"
+    assert fake_session.model_provider == "openrouter"
+
+
+def test_dispatch_stamp_snapshots_provider_under_agent_lock(monkeypatch):
+    fake_session = FakeSession(model="haiku-4-5", model_provider="anthropic")
+
+    class PickerUpdateLock:
+        def __init__(self):
+            self._entered = 0
+
+        def __enter__(self):
+            self._entered += 1
+            if self._entered == 1:
+                fake_session.model_provider = "openrouter"
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(streaming, "_get_session_agent_lock", lambda _session_id: PickerUpdateLock())
+
+    _run_streaming_turn(
+        monkeypatch,
+        fake_session,
+        stream_id="stream-4251-lock-race",
+    )
+
+    assert fake_session.model == "haiku-4-5"
     assert fake_session.model_provider == "openrouter"
