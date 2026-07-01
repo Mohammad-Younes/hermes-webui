@@ -3355,8 +3355,10 @@ def resolve_model_reasoning_efforts(
             if isinstance(_prov_entry, dict):
                 _re_list = _prov_entry.get("reasoning_efforts")
                 if isinstance(_re_list, list) and _re_list:
-                    return [str(x).strip().lower() for x in _re_list
-                            if str(x).strip().lower() in {*VALID_REASONING_EFFORTS, "none"}]
+                    _filtered = [str(x).strip().lower() for x in _re_list
+                                 if str(x).strip().lower() in {*VALID_REASONING_EFFORTS, "none"}]
+                    if _filtered:
+                        return _filtered
         except Exception:
             pass
 
