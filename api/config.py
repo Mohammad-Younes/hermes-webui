@@ -6808,16 +6808,18 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
                     raw_models = []
 
                     # User-configured model allowlists are explicit local
-                    # source-of-truth for custom/plugin providers, but built-in
-                    # Hermes providers also use providers.<id>.models as a
-                    # per-model settings map (reasoning_effort, limits, etc.).
-                    # Treating that settings map as an allowlist collapsed the
-                    # Copilot picker to whichever model had local settings.
-                    # Built-ins should ask Hermes CLI for the live catalog first;
-                    # WebUI's static _PROVIDER_MODELS table remains fallback only.
-                    _is_builtin_catalog_provider = pid in _PROVIDER_MODELS
+                    # source-of-truth for custom/plugin providers, AND for most
+                    # built-in Hermes providers (e.g. providers.anthropic.models
+                    # is a real picker allowlist — see #644). Copilot is the
+                    # exception: it uses providers.copilot.models as a per-model
+                    # settings map (reasoning_effort, limits, etc.), so treating
+                    # that as an allowlist collapsed the Copilot picker to
+                    # whichever model had local settings. Only Copilot skips the
+                    # config-models allowlist branch and asks Hermes CLI for the
+                    # live catalog first (static _PROVIDER_MODELS is fallback only).
+                    _uses_models_as_settings_map = pid == "copilot"
                     if (
-                        not _is_builtin_catalog_provider
+                        not _uses_models_as_settings_map
                         and isinstance(provider_cfg, dict)
                         and "models" in provider_cfg
                     ):
