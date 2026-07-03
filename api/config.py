@@ -8194,6 +8194,18 @@ def persisted_speech_settings_keys() -> list[str]:
     return sorted(_extract_persisted_speech_keys(_read_raw_settings_file()))
 
 
+def _settings_payload_for_write(settings: dict, persisted_speech_keys: set[str]) -> dict:
+    persisted = {
+        k: v
+        for k, v in settings.items()
+        if k not in {"default_model", _SETTINGS_PERSISTED_SPEECH_KEYS_FIELD}
+    }
+    for speech_key in _SETTINGS_SPEECH_KEYS:
+        if speech_key not in persisted_speech_keys:
+            persisted.pop(speech_key, None)
+    return persisted
+
+
 def load_settings() -> dict:
     """Load settings from disk, merging with defaults for any missing keys."""
     settings = dict(_SETTINGS_DEFAULTS)
@@ -8515,17 +8527,7 @@ def save_settings(settings: dict) -> dict:
     )
     effective_persisted_speech_keys = set(persisted_speech_keys)
     effective_persisted_speech_keys.update(applied_speech_keys)
-    persisted = {
-        k: v
-        for k, v in current.items()
-        if k not in {"default_model", _SETTINGS_PERSISTED_SPEECH_KEYS_FIELD}
-    }
-    # Persist speech keys only if they were already present on disk or explicitly
-    # submitted in this request. This avoids auto-materializing defaults during
-    # unrelated saves.
-    for speech_key in _SETTINGS_SPEECH_KEYS:
-        if speech_key not in effective_persisted_speech_keys:
-            persisted.pop(speech_key, None)
+    persisted = _settings_payload_for_write(current, effective_persisted_speech_keys)
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(
         json.dumps(persisted, ensure_ascii=False, indent=2),
@@ -8567,8 +8569,17 @@ if _settings_file_exists:
     if _startup_settings.get("default_workspace") != str(DEFAULT_WORKSPACE):
         _startup_settings["default_workspace"] = str(DEFAULT_WORKSPACE)
         try:
+            startup_persisted_speech_keys = _extract_persisted_speech_keys(
+                _read_raw_settings_file()
+            )
             SETTINGS_FILE.write_text(
-                json.dumps(_startup_settings, ensure_ascii=False, indent=2),
+                json.dumps(
+                    _settings_payload_for_write(
+                        _startup_settings, startup_persisted_speech_keys
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
         except Exception:

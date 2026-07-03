@@ -187,6 +187,40 @@ def test_unrelated_settings_save_does_not_materialize_absent_speech_defaults():
         _restore_settings_file(path, original)
 
 
+def test_startup_workspace_repair_write_drops_merged_speech_defaults():
+    path, original = _settings_file_snapshot()
+    cfg = importlib.import_module("api.config")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "show_tps": False,
+                    "tts_pitch": 0.0,
+                    "default_workspace": "C:/stale/workspace",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        merged = cfg.load_settings()
+        merged["default_workspace"] = "C:/fixed/workspace"
+        persisted = cfg._settings_payload_for_write(
+            merged, cfg._extract_persisted_speech_keys(cfg._read_raw_settings_file())
+        )
+
+        assert persisted["show_tps"] is False
+        assert persisted["tts_pitch"] == 0.0
+        assert persisted["default_workspace"] == "C:/fixed/workspace"
+        assert PERSISTED_SPEECH_KEYS_FIELD not in persisted
+        for key in SPEECH_DEFAULTS:
+            if key != "tts_pitch":
+                assert key not in persisted
+    finally:
+        _restore_settings_file(path, original)
+
+
 def test_invalid_speech_settings_preserve_previous_values_and_unrelated_settings():
     data, status = get("/api/settings")
     original_show_tps = bool(data.get("show_tps"))
