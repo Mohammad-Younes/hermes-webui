@@ -169,7 +169,13 @@ def test_branch_endpoint_validates_session_id():
 
 
 def test_branch_endpoint_consults_foreign_session_guard_on_missing_sidecar():
-    """Missing sidecars should classify foreign read-only sessions before 404ing."""
+    """Missing sidecars should classify foreign read-only sessions before 404ing.
+
+    The classification logic was extracted from the inline handler into the
+    ``_load_branch_source_or_refuse`` helper (#5449). Assert the handler
+    delegates to it, and that the helper carries the real not_claimable→403
+    provenance logic — not a stale inline copy.
+    """
     src = _read('api/routes.py')
     branch_match = re.search(
         r'parsed\.path == "/api/session/branch"(.*?)(?=\n    if parsed\.path|$)',
@@ -177,12 +183,24 @@ def test_branch_endpoint_consults_foreign_session_guard_on_missing_sidecar():
     )
     assert branch_match, "Could not find /api/session/branch handler block"
     block = branch_match.group(1)
-    assert '_claim_or_synthesize_cli_session(body["session_id"])' in block, \
-        "Branch handler should classify missing-sidecar foreign sessions before returning"
-    assert 'if _reason == "not_claimable":' in block, \
-        "Branch handler should branch on not_claimable foreign ownership"
-    assert 'return bad(handler, "Read-only sessions cannot be branched from WebUI", 403)' in block, \
-        "Branch handler should return a provenance-correct 403 for read-only foreign sessions"
+    assert '_load_branch_source_or_refuse(handler, body["session_id"])' in block, \
+        "Branch handler should delegate source-load/refusal to the shared helper"
+
+    # The helper itself must carry the foreign-session classification + 403.
+    helper_match = re.search(
+        r'def _load_branch_source_or_refuse\(.*?\)(.*?)(?=\ndef )',
+        src, re.DOTALL
+    )
+    assert helper_match, "Could not find _load_branch_source_or_refuse helper"
+    helper = helper_match.group(1)
+    assert '_claim_or_synthesize_cli_session(sid)' in helper, \
+        "Helper should classify missing-sidecar foreign sessions before returning"
+    assert 'if _reason == "not_claimable":' in helper, \
+        "Helper should branch on not_claimable foreign ownership"
+    assert 'return bad(handler, "Read-only sessions cannot be branched from WebUI", 403)' in helper \
+        or ('bad(handler, "Read-only sessions cannot be branched from WebUI", 403)' in helper
+            and 'return None' in helper), \
+        "Helper should return a provenance-correct 403 for read-only foreign sessions"
 
 
 def test_branch_endpoint_returns_new_session_id():
