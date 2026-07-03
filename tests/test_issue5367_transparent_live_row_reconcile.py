@@ -70,6 +70,12 @@ class FakeElement {{
   }}
   get parentElement(){{ return this.parentNode; }}
   get firstChild(){{ return this.children[0]||null; }}
+  get nextSibling(){{
+    if(!this.parentNode) return null;
+    const siblings = this.parentNode.children;
+    const idx = siblings.indexOf(this);
+    return idx >= 0 ? (siblings[idx + 1] || null) : null;
+  }}
   get className(){{
     return Array.from(this._classes).join(' ');
   }}
@@ -123,6 +129,7 @@ class FakeElement {{
     }}
   }}
   appendChild(child){{
+    this.appendChildCount = (this.appendChildCount || 0) + 1;
     if(child && child.parentNode) child.remove();
     if(!child) return null;
     child.parentNode = this;
@@ -130,6 +137,7 @@ class FakeElement {{
     return child;
   }}
   insertBefore(child, refNode){{
+    this.insertBeforeCount = (this.insertBeforeCount || 0) + 1;
     if(child && child.parentNode) child.remove();
     if(!child) return null;
     const idx = this.children.indexOf(refNode);
@@ -299,7 +307,11 @@ const keptAfterFirst = turn.querySelector('.transparent-event-row[data-anchor-ro
 const staleAfterFirst = turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-stale\"]');
 const firstFooter = turn.querySelector('#liveRunStatus');
 
+turn.insertBeforeCount = 0;
+turn.appendChildCount = 0;
 const secondRender = _renderLiveAnchorActivitySceneTransparent('stream-1', secondScene, {{ sessionId:'session-1' }});
+const secondInsertBeforeCount = turn.insertBeforeCount || 0;
+const secondAppendChildCount = turn.appendChildCount || 0;
 const keptAfterSecond = turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-kept\"]');
 const staleAfterSecond = turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-stale\"]');
 const newAfterSecond = turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-new\"]');
@@ -312,6 +324,39 @@ const idxs = {{
   rowKeeps: rows.indexOf(keptAfterSecond),
   rowNew: rows.indexOf(newAfterSecond),
   stale: rows.findIndex((child) => child.getAttribute('data-anchor-row-id') === 'row-stale'),
+}};
+
+turn.insertBeforeCount = 0;
+turn.appendChildCount = 0;
+_renderLiveAnchorActivitySceneTransparent('stream-1', secondScene, {{ sessionId:'session-1' }});
+const stableInsertBeforeCount = turn.insertBeforeCount || 0;
+const stableAppendChildCount = turn.appendChildCount || 0;
+
+const reorderedScene = {{
+  version:'activity_scene_v1',
+  activity_rows:[
+    {{ row_id:'row-new', role:'prose', source_event_type:'process_prose', text:'new row appears' }},
+    {{ row_id:'row-kept', role:'prose', source_event_type:'process_prose', text:'updated progress line' }},
+  ],
+}};
+turn.insertBeforeCount = 0;
+turn.appendChildCount = 0;
+_renderLiveAnchorActivitySceneTransparent('stream-1', reorderedScene, {{ sessionId:'session-1' }});
+const reorderInsertBeforeCount = turn.insertBeforeCount || 0;
+const reorderedIds = turn.children
+  .filter((child) => child.classList.contains('transparent-event-row'))
+  .map((child) => child.getAttribute('data-anchor-row-id'));
+
+firstFooter.remove();
+turn.insertBefore(firstFooter, turn.children[0] || null);
+turn.insertBeforeCount = 0;
+turn.appendChildCount = 0;
+_renderLiveAnchorActivitySceneTransparent('stream-1', reorderedScene, {{ sessionId:'session-1' }});
+const footerRepairInsertBeforeCount = turn.insertBeforeCount || 0;
+const footerRepairIdxs = {{
+  newRow: turn.children.indexOf(turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-new\"]')),
+  keptRow: turn.children.indexOf(turn.querySelector('.transparent-event-row[data-anchor-row-id=\"row-kept\"]')),
+  footer: turn.children.indexOf(firstFooter),
 }};
 
 _renderLiveAnchorActivitySceneTransparent('stream-1', thirdScene, {{ sessionId:'session-1' }});
@@ -329,6 +374,14 @@ process.stdout.write(JSON.stringify({{
   staleGone: staleAfterSecond === null,
   staleAfterFirst: staleAfterFirst !== null,
   idxs,
+  secondInsertBeforeCount,
+  secondAppendChildCount,
+  stableInsertBeforeCount,
+  stableAppendChildCount,
+  reorderInsertBeforeCount,
+  reorderedIds,
+  footerRepairInsertBeforeCount,
+  footerRepairIdxs,
   hasNewRow: !!newAfterSecond,
   newRowSession: newAfterSecond && newAfterSecond.getAttribute('data-session-id'),
   keylessAfterThird: keylessRowsAfterThird.length,
@@ -355,6 +408,16 @@ process.stdout.write(JSON.stringify({{
     assert data["idxs"]["rowNew"] == 1
     assert data["idxs"]["stale"] == -1
     assert data["idxs"]["staleInVisibleRows"] == -1
+    assert data["secondInsertBeforeCount"] >= 1
+    assert data["secondAppendChildCount"] == 0
+    assert data["stableInsertBeforeCount"] == 0
+    assert data["stableAppendChildCount"] == 0
+    assert data["reorderInsertBeforeCount"] >= 1
+    assert data["reorderedIds"] == ["row-new", "row-kept"]
+    assert data["footerRepairInsertBeforeCount"] >= 1
+    assert data["footerRepairIdxs"]["newRow"] == 0
+    assert data["footerRepairIdxs"]["keptRow"] == 1
+    assert data["footerRepairIdxs"]["footer"] > data["footerRepairIdxs"]["keptRow"]
     assert data["hasNewRow"] is True
     assert data["newRowSession"] == "session-1"
     assert data["keylessAfterThird"] == 1

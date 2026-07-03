@@ -10945,6 +10945,7 @@ function _renderLiveAnchorActivitySceneTransparent(streamId, scene, opts){
   });
   const liveFooter=blocks.querySelector('#liveRunStatus');
   let wrote=false;
+  const targetRenderedRows=[];
   for(const row of rows){
     const node=_anchorSceneTransparentNodeForRow(row,{
       live:true,
@@ -10960,9 +10961,34 @@ function _renderLiveAnchorActivitySceneTransparent(streamId, scene, opts){
       : node;
     if(existing) preserveByKey.delete(key);
     if(!renderedNode) continue;
-    if(liveFooter&&liveFooter.parentElement===blocks) blocks.insertBefore(renderedNode,liveFooter);
-    else blocks.appendChild(renderedNode);
+    targetRenderedRows.push(renderedNode);
     wrote=true;
+  }
+  const transparentLiveRowNextSibling=(node)=>{
+    if(!node) return null;
+    if(typeof node.nextSibling!=='undefined') return node.nextSibling;
+    const parent=node.parentElement||node.parentNode;
+    if(parent&&parent.children&&typeof parent.children.length==='number'){
+      const index=Array.prototype.indexOf.call(parent.children,node);
+      return index>=0 ? (parent.children[index+1]||null) : null;
+    }
+    return null;
+  };
+  const transparentLiveRowAlreadyPositioned=(node, expectedNextSibling)=>!!(
+    node &&
+    node.parentElement===blocks &&
+    transparentLiveRowNextSibling(node)===expectedNextSibling
+  );
+  let expectedNextSibling=(liveFooter&&liveFooter.parentElement===blocks) ? liveFooter : null;
+  for(let i=targetRenderedRows.length-1;i>=0;i--){
+    const renderedNode=targetRenderedRows[i];
+    if(transparentLiveRowAlreadyPositioned(renderedNode,expectedNextSibling)){
+      expectedNextSibling=renderedNode;
+      continue;
+    }
+    if(expectedNextSibling&&expectedNextSibling.parentElement===blocks) blocks.insertBefore(renderedNode,expectedNextSibling);
+    else blocks.appendChild(renderedNode);
+    expectedNextSibling=renderedNode;
   }
   preserveByKey.forEach(stale=>stale.remove());
   if(wrote) _syncTransparentEventControls(turn);
@@ -11067,7 +11093,9 @@ function _refreshTransparentLiveRow(existing, node){
     existing.setAttribute(name, value);
   }
   existing.className = node.className || '';
-  existing.innerHTML = node.innerHTML || '';
+  const newHtml = node.innerHTML || '';
+  const htmlChanged = existing.innerHTML !== newHtml;
+  if(htmlChanged) existing.innerHTML = newHtml;
   _rehydrateTransparentLiveRow(existing, node, preservedState);
   return existing;
 }
