@@ -5395,7 +5395,7 @@ function _repinMessagesAfterComposerResize(){
   if(!el) return;
   // Already at/very near the bottom? nothing to do (avoids needless writes while
   // idle-reading a short conversation that isn't scrollable).
-  if(el.scrollHeight-el.scrollTop-el.clientHeight<=1) return;
+  if(_messageBottomDistance()<=1) return;
   if(typeof _setMessageScrollToBottom==='function') _setMessageScrollToBottom();
   else { el.scrollTop=el.scrollHeight; }
 }

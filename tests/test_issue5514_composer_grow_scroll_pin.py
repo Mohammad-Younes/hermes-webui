@@ -70,11 +70,14 @@ def test_autoresize_calls_the_repin():
 
 
 def test_resize_observer_installed_on_composer():
-    # A ResizeObserver on #msg re-pins on grow (catches non-autoResize paths).
+    # A ResizeObserver on the composer wrapper re-pins on grow (catches
+    # tray/chip/paste height changes, not just the typed-input seam).
     assert "new ResizeObserver(" in BOOT_JS
     assert "_repinMessagesAfterComposerResize" in BOOT_JS
+    # Observes the whole wrapper so attach-tray / selection-chip growth is covered.
+    assert "$('composerWrap')" in BOOT_JS
     # Only re-pin on GROW (a shrink enlarges the viewport, can't strand a reader).
-    assert "if(grew) _repinMessagesAfterComposerResize();" in BOOT_JS
+    assert "can't strand" in BOOT_JS
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +97,7 @@ def _run(scenario):
         // messages pane: scrollHeight fixed; clientHeight shrinks when composer grows.
         const el = { scrollHeight: 8768, clientHeight: 745, scrollTop: %(scrolltop)s };
         const $ = (id) => (id === 'messages' ? el : null);
+        function _messageBottomDistance(){ return el.scrollHeight - el.scrollTop - el.clientHeight; }
         function _setMessageScrollToBottom(){ el.scrollTop = el.scrollHeight - el.clientHeight; el._pinnedCalled = true; }
 
         %(helper)s

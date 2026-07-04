@@ -1918,27 +1918,25 @@ $('msg').addEventListener('input',()=>{
 });
 // #5514/#5515: re-pin the transcript on ANY composer height change, not only the
 // ones that route through the input->autoResize path. A multi-line paste
-// (WisprFlow), a draft restore, a programmatic value set, or a font/reflow can
-// all grow the composer and shrink the flex:1 transcript viewport, stranding a
-// pinned reader above the bottom (reads as a "random" upward jump — #5515). A
-// ResizeObserver on the textarea catches every case at one seam. The re-pin
-// itself is guarded (only fires when genuinely pinned), so this never fights a
-// reader who scrolled away. First callback fires on observe (initial size) — the
-// guard makes that a cheap no-op.
+// (WisprFlow), a draft restore, an attachment tray / selection-chip appearing, a
+// programmatic value set, or a font/reflow can all grow the composer and shrink
+// the flex:1 transcript viewport, stranding a pinned reader above the bottom
+// (reads as a "random" upward jump — #5515). Observe the whole #composerWrap
+// (not just #msg) so tray/chip growth is covered too, at one seam. The re-pin is
+// guarded (only fires when genuinely pinned), so it never fights a reader who
+// scrolled away. First callback fires on observe (initial size) — the guard
+// makes that a cheap no-op.
 (()=>{
-  const _c=$('msg');
-  if(!_c || typeof ResizeObserver!=='function' || typeof _repinMessagesAfterComposerResize!=='function') return;
-  let _lastComposerH=_c.offsetHeight;
+  const _cw=$('composerWrap')||$('msg');
+  if(!_cw || typeof ResizeObserver!=='function' || typeof _repinMessagesAfterComposerResize!=='function') return;
+  let _lastComposerH=_cw.offsetHeight;
   const _ro=new ResizeObserver(()=>{
-    const h=_c.offsetHeight;
-    if(h===_lastComposerH) return;   // width-only / no-op resize: ignore
-    const grew=h>_lastComposerH;
+    const h=_cw.offsetHeight;
+    if(h<=_lastComposerH){_lastComposerH=h;return;}   // shrink/no-op: enlarges the viewport, can't strand
     _lastComposerH=h;
-    // Only a GROW shrinks the transcript viewport; a shrink enlarges it and can't
-    // strand a pinned reader. Re-pin on grow.
-    if(grew) _repinMessagesAfterComposerResize();
+    _repinMessagesAfterComposerResize();               // grow: re-pin the pinned reader
   });
-  try{ _ro.observe(_c); }catch(_){ }
+  try{ _ro.observe(_cw); }catch(_){ }
 })();
 // Track IME composition for East Asian input. Safari fires the committing
 // keydown AFTER compositionend with isComposing=false, so we also keep a
