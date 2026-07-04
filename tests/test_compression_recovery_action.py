@@ -223,7 +223,56 @@ def test_recovery_start_creates_focused_linked_session(monkeypatch, tmp_path):
     saved = json.loads((session_dir / f"{new_session['session_id']}.json").read_text(encoding="utf-8"))
     assert saved["parent_session_id"] == sid
     assert saved["context_messages"] == []
+    assert saved["compression_recovery_source_session_id"] == sid
+    assert saved["compression_recovery_action"] == "start_focused_continuation"
     assert compression_recovery_payload_for_session(session)["recommended_action"] == "start_focused_continuation"
+
+
+def test_recovery_start_reuses_existing_focused_session(monkeypatch, tmp_path):
+    session_dir = _isolate_sessions(monkeypatch, tmp_path)
+    sid = "recoverysrc2"
+    session = Session(
+        session_id=sid,
+        title="Long task",
+        workspace=str(tmp_path),
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "long task"}],
+    )
+    stamp_compression_exhausted_recovery(session, message="Context length exceeded.")
+    session.save()
+    models.SESSIONS[sid] = session
+    routes.SESSIONS[sid] = session
+
+    first_handler = _JSONHandler()
+    routes._handle_session_compression_recovery_start(first_handler, {"session_id": sid})
+    first_payload = _payload(first_handler)
+    first_child_id = first_payload["session"]["session_id"]
+
+    second_handler = _JSONHandler()
+    routes._handle_session_compression_recovery_start(second_handler, {"session_id": sid})
+    second_payload = _payload(second_handler)
+
+    assert second_handler.status == 200
+    assert second_payload["session"]["session_id"] == first_child_id
+    assert second_payload["message"].startswith("Opened the existing")
+
+    models.SESSIONS.clear()
+    routes.SESSIONS.clear()
+    third_handler = _JSONHandler()
+    routes._handle_session_compression_recovery_start(third_handler, {"session_id": sid})
+    third_payload = _payload(third_handler)
+
+    assert third_handler.status == 200
+    assert third_payload["session"]["session_id"] == first_child_id
+
+    recovery_children = []
+    for path in session_dir.glob("*.json"):
+        if path.name.startswith("_"):
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("compression_recovery_source_session_id") == sid:
+            recovery_children.append(data)
+    assert len(recovery_children) == 1
 
 
 def test_recovery_metadata_is_persisted_and_exposed_in_compact_session():
@@ -243,6 +292,7 @@ def test_compression_recovery_ui_wires_card_action_and_send_intercept():
     assert "function _compressionRecoveryHtml" in ui
     assert "data-compression-recovery-card=\"1\"" in ui
     assert "api('/api/session/compression-recovery/start'" in ui
+    assert "Compression recovery did not return a session." in ui
     assert "function shouldInterceptCompressionRecoveryContinuation" in ui
     assert "shouldInterceptCompressionRecoveryContinuation(text,S.pendingFiles)" in messages
     assert "_compressionRecovery:recovery||undefined" in messages

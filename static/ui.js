@@ -483,16 +483,15 @@ async function startCompressionRecovery(btn){
   try{
     const data=await api('/api/session/compression-recovery/start',{method:'POST',body:JSON.stringify({session_id:sourceSid})});
     const sid=data&&data.session&&data.session.session_id;
-    if(sid){
-      try{localStorage.setItem('hermes-webui-session',sid);}catch(_){}
-      if(typeof loadSession==='function') await loadSession(sid,{preserveActiveInput:false});
-      else if(data.session){S.session=data.session;S.messages=data.session.messages||[];syncTopbar();renderMessages();}
-      if(typeof renderSessionList==='function') await renderSessionList();
-      if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(sid);
-      if(typeof showToast==='function') showToast((data&&data.message)||'Started focused continuation.',3000,'success');
-      const composer=$('msg');
-      if(composer&&typeof composer.focus==='function') composer.focus();
-    }
+    if(!sid) throw new Error('Compression recovery did not return a session.');
+    try{localStorage.setItem('hermes-webui-session',sid);}catch(_){}
+    if(typeof loadSession==='function') await loadSession(sid,{preserveActiveInput:false});
+    else if(data.session){S.session=data.session;S.messages=data.session.messages||[];syncTopbar();renderMessages();}
+    if(typeof renderSessionList==='function') await renderSessionList();
+    if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(sid);
+    if(typeof showToast==='function') showToast((data&&data.message)||'Started focused continuation.',3000,'success');
+    const composer=$('msg');
+    if(composer&&typeof composer.focus==='function') composer.focus();
   }catch(e){
     if(typeof showToast==='function') showToast('Compression recovery failed: '+(e&&e.message||e),5000,'error');
   }finally{

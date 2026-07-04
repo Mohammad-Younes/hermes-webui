@@ -8581,6 +8581,7 @@ def _keep_latest_messaging_session_per_source(
 from api.models import (
     Session,
     get_session,
+    find_compression_recovery_session,
     get_session_for_file_ops,
     new_session,
     all_sessions,
@@ -8620,6 +8621,9 @@ from api.models import (
     is_cron_session,
     is_safe_session_id,
 )
+
+
+_COMPRESSION_RECOVERY_START_LOCK = threading.Lock()
 
 
 def _pre_compression_continuation_session_id(session) -> str | None:
@@ -19756,53 +19760,61 @@ def _handle_session_compression_recovery_start(handler, body):
     if action != COMPRESSION_RECOVERY_ACTION_START_FOCUSED:
         return bad(handler, "Unsupported compression recovery action.", 409)
 
-    title = str(getattr(source, "title", None) or "Untitled").strip() or "Untitled"
-    if not title.endswith(" (focused continuation)"):
-        title = f"{title} (focused continuation)"
-    copied_session = Session(
-        session_id=uuid.uuid4().hex[:12],
-        title=title,
-        workspace=getattr(source, "workspace", get_last_workspace()),
-        model=getattr(source, "model", None),
-        model_provider=getattr(source, "model_provider", None),
-        messages=[],
-        tool_calls=[],
-        pinned=False,
-        archived=False,
-        project_id=getattr(source, "project_id", None),
-        profile=getattr(source, "profile", None),
-        personality=getattr(source, "personality", None),
-        enabled_toolsets=copy.deepcopy(getattr(source, "enabled_toolsets", None)),
-        context_length=getattr(source, "context_length", None),
-        threshold_tokens=getattr(source, "threshold_tokens", None),
-        gateway_routing=copy.deepcopy(getattr(source, "gateway_routing", None)),
-        gateway_routing_history=copy.deepcopy(getattr(source, "gateway_routing_history", None) or []),
-        parent_session_id=getattr(source, "session_id", sid),
-        worktree_path=getattr(source, "worktree_path", None),
-        worktree_branch=getattr(source, "worktree_branch", None),
-        worktree_repo_root=getattr(source, "worktree_repo_root", None),
-        worktree_created_at=getattr(source, "worktree_created_at", None),
-    )
-    # Preserve the workspace/model/profile lane, but intentionally start with an
-    # empty model-facing transcript so a focused follow-up does not replay the
-    # exhausted state.db/context tail.
-    copied_session.context_messages = []
-    copied_session.composer_draft = {"text": "", "files": []}
-    try:
-        copied_session.save()
-    except Exception as e:
-        logger.exception("failed to persist compression recovery session for %s", sid)
-        return bad(handler, f"Failed to start compression recovery: {_sanitize_error(e)}", 500)
+    created = False
+    with _COMPRESSION_RECOVERY_START_LOCK:
+        copied_session = find_compression_recovery_session(sid, action)
+        if copied_session is None:
+            title = str(getattr(source, "title", None) or "Untitled").strip() or "Untitled"
+            if not title.endswith(" (focused continuation)"):
+                title = f"{title} (focused continuation)"
+            copied_session = Session(
+                session_id=uuid.uuid4().hex[:12],
+                title=title,
+                workspace=getattr(source, "workspace", get_last_workspace()),
+                model=getattr(source, "model", None),
+                model_provider=getattr(source, "model_provider", None),
+                messages=[],
+                tool_calls=[],
+                pinned=False,
+                archived=False,
+                project_id=getattr(source, "project_id", None),
+                profile=getattr(source, "profile", None),
+                personality=getattr(source, "personality", None),
+                enabled_toolsets=copy.deepcopy(getattr(source, "enabled_toolsets", None)),
+                context_length=getattr(source, "context_length", None),
+                threshold_tokens=getattr(source, "threshold_tokens", None),
+                gateway_routing=copy.deepcopy(getattr(source, "gateway_routing", None)),
+                gateway_routing_history=copy.deepcopy(getattr(source, "gateway_routing_history", None) or []),
+                parent_session_id=getattr(source, "session_id", sid),
+                worktree_path=getattr(source, "worktree_path", None),
+                worktree_branch=getattr(source, "worktree_branch", None),
+                worktree_repo_root=getattr(source, "worktree_repo_root", None),
+                worktree_created_at=getattr(source, "worktree_created_at", None),
+                compression_recovery_source_session_id=sid,
+                compression_recovery_action=action,
+            )
+            # Preserve the workspace/model/profile lane, but intentionally start with an
+            # empty model-facing transcript so a focused follow-up does not replay the
+            # exhausted state.db/context tail.
+            copied_session.context_messages = []
+            copied_session.composer_draft = {"text": "", "files": []}
+            try:
+                copied_session.save()
+            except Exception as e:
+                logger.exception("failed to persist compression recovery session for %s", sid)
+                return bad(handler, f"Failed to start compression recovery: {_sanitize_error(e)}", 500)
 
-    with LOCK:
-        SESSIONS[copied_session.session_id] = copied_session
-        SESSIONS.move_to_end(copied_session.session_id)
-        _evict_sessions_over_cap()
-    publish_session_list_changed(
-        "session_compression_recovery",
-        profile=getattr(copied_session, "profile", None),
-        session_id=getattr(copied_session, "session_id", None),
-    )
+            with LOCK:
+                SESSIONS[copied_session.session_id] = copied_session
+                SESSIONS.move_to_end(copied_session.session_id)
+                _evict_sessions_over_cap()
+            created = True
+    if created:
+        publish_session_list_changed(
+            "session_compression_recovery",
+            profile=getattr(copied_session, "profile", None),
+            session_id=getattr(copied_session, "session_id", None),
+        )
     session_payload = redact_session_data(copied_session.compact() | {"messages": copied_session.messages})
     return j(
         handler,
@@ -19811,7 +19823,11 @@ def _handle_session_compression_recovery_start(handler, body):
             "session": session_payload,
             "source_session_id": sid,
             "recommended_recovery_action": action,
-            "message": "Started a focused continuation. Describe the next narrow task to continue.",
+            "message": (
+                "Started a focused continuation. Describe the next narrow task to continue."
+                if created
+                else "Opened the existing focused continuation for this exhausted session."
+            ),
         },
     )
 
