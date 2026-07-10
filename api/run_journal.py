@@ -340,7 +340,7 @@ def read_session_run_events(
         expected_seq = 1
         try:
             with path.open(encoding="utf-8") as fh:
-                for line_no, raw in enumerate(fh, start=1):
+                for raw in fh:
                     retained_bytes += len(raw.encode("utf-8"))
                     if retained_bytes > max_bytes:
                         return {"session_id": sid, "cursor_run_id": cursor_run_id, "cursor_seq": cursor_seq, "status": "replay_limit_bytes", "events": []}

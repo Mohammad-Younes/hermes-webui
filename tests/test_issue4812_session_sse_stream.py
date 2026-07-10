@@ -278,7 +278,7 @@ def test_session_route_arms_deadline_immediately_after_headers(monkeypatch):
     monkeypatch.setattr(routes, "end_sse_headers", lambda _handler: calls.append("headers"))
     monkeypatch.setattr(routes, "_sse_set_write_deadline", lambda _handler: calls.append("deadline"))
 
-    routes._handle_session_sse_stream_for_session(handler := _FakeHandler(), urlparse("/api/sessions/session_1/events"), "session_1")
+    routes._handle_session_sse_stream_for_session(_FakeHandler(), urlparse("/api/sessions/session_1/events"), "session_1")
 
     assert calls[:2] == ["headers", "deadline"]
     assert stop["count"] == 1
