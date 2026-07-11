@@ -40,8 +40,10 @@ def _make_session_with_messages():
     sid = created["session"]["session_id"]
     from api.models import Session
 
-    session = Session.load(sid)
-    assert session is not None
+    # Current master keeps a freshly /api/session/new session memory-only until
+    # its first message is persisted, so Session.load(sid) can return None here.
+    # Construct + persist the session directly so the share path has a real file.
+    session = Session.load(sid) or Session(session_id=sid)
     session.title = "Shared Test"
     session.messages = [
         {"role": "system", "content": "internal system instructions should stay private"},

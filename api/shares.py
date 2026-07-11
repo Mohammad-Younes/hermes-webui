@@ -19,6 +19,12 @@ from pathlib import Path
 
 from api.config import STATE_DIR
 from api.helpers import redact_session_data
+# _redact_fn_cached is the ALWAYS-ON credential redactor (agent redactor with
+# force=True + local fallback regex). Unlike redact_session_data it does NOT
+# consult the user-toggleable api_redact_enabled setting — a public share is a
+# hard safety boundary that must redact credentials even if the operator turned
+# API-response redaction off.
+from api.helpers import _redact_fn_cached as _force_redact_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +73,38 @@ def _share_message_text(message: dict) -> str:
         parts = []
         for item in content:
             if not isinstance(item, dict):
+                # Non-dict list items (e.g. nested structures) are NOT plain text —
+                # never stringify them into the public snapshot.
                 continue
             if item.get("type") == "text":
                 parts.append(str(item.get("text") or ""))
         return "".join(parts).strip()
-    return str(content or "").strip()
+    if isinstance(content, str):
+        return content.strip()
+    # A dict/other structured content (e.g. a tool-result object) is NOT shareable
+    # text — do NOT str() it (that would publish raw structured/tool payload).
+    return ""
 
 
-def _sanitize_message(message: dict) -> dict | None:
+def _redact_share_paths(text: str, extra_paths) -> str:
+    """Strip known local session/workspace/home paths out of public-share text.
+
+    A workspace path or Hermes home can be embedded inside message prose (an
+    agent quoting a file path, a traceback, etc.). Redact the concrete local
+    paths so a public share never discloses the operator's filesystem layout.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    for p in extra_paths:
+        if not p:
+            continue
+        p = str(p).strip()
+        if len(p) >= 4 and p in text:
+            text = text.replace(p, "[redacted-path]")
+    return text
+
+
+def _sanitize_message(message: dict, *, redact_paths=()) -> dict | None:
     if not isinstance(message, dict):
         return None
     role = str(message.get("role") or "").strip().lower()
@@ -82,6 +112,12 @@ def _sanitize_message(message: dict) -> dict | None:
         return None
     text = _share_message_text(message)
     if not text:
+        return None
+    # ALWAYS-ON hardening for the public boundary, independent of any setting:
+    # (1) force credential redaction, (2) strip known local paths.
+    text = _force_redact_credentials(text)
+    text = _redact_share_paths(text, redact_paths)
+    if not text.strip():
         return None
     sanitized = {
         "role": role,
@@ -112,16 +148,38 @@ def _public_share_payload(payload: dict) -> dict:
 
 
 def build_share_snapshot(session) -> dict:
-    safe_session = redact_session_data(getattr(session, "__dict__", {}) or {})
+    raw_dict = getattr(session, "__dict__", {}) or {}
+    # redact_session_data respects the api_redact_enabled setting; keep it as a
+    # first pass, but the per-message sanitizer below applies ALWAYS-ON credential
+    # + path redaction that does NOT depend on that setting (the public boundary
+    # must hold even if the operator disabled api_redact_enabled).
+    safe_session = redact_session_data(raw_dict)
+    # Concrete local paths to scrub from any message prose / title.
+    redact_paths = []
+    for key in ("workspace", "worktree_path", "worktree_repo_root"):
+        val = raw_dict.get(key)
+        if val:
+            redact_paths.append(str(val))
+    try:
+        from api.profiles import get_active_hermes_home
+        redact_paths.append(str(get_active_hermes_home()))
+    except Exception:
+        pass
+    try:
+        redact_paths.append(str(Path.home()))
+    except Exception:
+        pass
     safe_messages = []
     for raw in safe_session.get("messages") or []:
-        sanitized = _sanitize_message(raw)
+        sanitized = _sanitize_message(raw, redact_paths=redact_paths)
         if sanitized:
             safe_messages.append(sanitized)
     if not safe_messages:
         raise ValueError("This conversation has no shareable messages yet.")
+    title = _force_redact_credentials(str(safe_session.get("title") or "Untitled"))
+    title = _redact_share_paths(title, redact_paths) or "Untitled"
     return {
-        "title": str(safe_session.get("title") or "Untitled"),
+        "title": title,
         "messages": safe_messages,
         "message_count": len(safe_messages),
     }

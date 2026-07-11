@@ -74,3 +74,54 @@ def test_session_action_menu_exposes_public_share_actions():
 def test_public_share_page_does_not_render_provider_details_blocks():
     assert "provider-error-details" not in SHARE_JS
     assert "provider_details_label||'Provider details'" not in SHARE_JS
+
+
+def test_share_action_buttons_are_not_duplicated():
+    # Regression: a rebase double-applied the Share/StopSharing/ExportHTML button
+    # triplet, leaving duplicate IDs so getElementById wired only the first copy
+    # (three visible-but-inert buttons). Each control must appear exactly once.
+    for _id in ("btnShareSession", "btnStopSharingSession", "btnExportHTML"):
+        assert INDEX_HTML.count(f'id="{_id}"') == 1, f"{_id} must appear exactly once"
+
+
+def test_share_snapshot_redaction_is_always_on_regardless_of_setting():
+    # The public-share boundary must redact credentials + local paths and drop
+    # non-text/tool/system content EVEN IF the operator disabled api_redact_enabled.
+    import os, tempfile, importlib
+    os.environ.setdefault("HERMES_WEBUI_STATE_DIR", tempfile.mkdtemp())
+    import api.config as config
+    import api.shares as shares
+    # Force the user-toggleable API redaction OFF (redact_session_data reads
+    # api.config.load_settings() at call time).
+    _orig = config.load_settings
+    config.load_settings = lambda: {"api_redact_enabled": False}
+    try:
+        class _S:
+            pass
+        s = _S()
+        s.title = "Deploy sk-ABCDEF1234567890TOKEN"
+        s.workspace = "/very/private/workspace"
+        s.messages = [
+            {"role": "system", "content": "internal system prompt stays private"},
+            {"role": "user", "content": "key sk-SECRET1234567890abcdef path /very/private/workspace/x.py"},
+            {"role": "assistant", "content": {"tool": "terminal", "output": "raw structured tool payload"}},
+            {"role": "tool", "content": "raw tool output"},
+            {"role": "assistant", "content": "Here is the answer."},
+        ]
+        snap = shares.build_share_snapshot(s)
+        import json
+        blob = json.dumps(snap)
+        # credentials masked (in both title and message text)
+        assert "sk-SECRET1234567890" not in blob
+        assert "sk-ABCDEF1234567890" not in blob
+        # local paths scrubbed
+        assert "/very/private/workspace" not in blob
+        # structured/dict content never stringified into the public payload
+        assert "raw structured tool payload" not in blob
+        # system + tool roles excluded
+        roles = [m["role"] for m in snap["messages"]]
+        assert "system" not in roles and "tool" not in roles
+        # the real answer is preserved
+        assert any("Here is the answer" in m["content"] for m in snap["messages"])
+    finally:
+        config.load_settings = _orig

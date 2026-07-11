@@ -4144,8 +4144,9 @@ async function _createOrRefreshSessionShare(session){
       cancelLabel:t('share_session_refresh_snapshot'),
     });
     if(reuse){
-      await _copyTextToClipboard(existing);
-      showToast(t('share_session_link_copied'));
+      let copied=true;
+      try{ await _copyTextToClipboard(existing); }catch(_){ copied=false; }
+      showToast(copied?t('share_session_link_copied'):(t('share_session_status_active')+' — '+existing),copied?2500:6000);
       window.open(existing,'_blank','noopener');
       return;
     }
@@ -4153,8 +4154,16 @@ async function _createOrRefreshSessionShare(session){
   const res=await api('/api/share/create',{method:'POST',body:JSON.stringify({session_id:session.session_id})});
   if(res&&res.session) _syncSessionShareState(session,res.session);
   const href=new URL(String(res&&res.share&&res.share.url||''),location.origin).href;
-  await _copyTextToClipboard(href);
-  showToast(existing?t('share_session_link_copied'):t('share_session_created'));
+  // The share is now created server-side. A clipboard-copy failure (permissions,
+  // focus, non-secure context) must NOT be reported as "Share failed" — the link
+  // exists and we still open it. Only surface the copied-vs-not-copied distinction.
+  let copied=true;
+  try{ await _copyTextToClipboard(href); }catch(_){ copied=false; }
+  if(copied){
+    showToast(existing?t('share_session_link_copied'):t('share_session_created'));
+  }else{
+    showToast((existing?t('share_session_created'):t('share_session_created'))+' — '+href,6000);
+  }
   window.open(href,'_blank','noopener');
 }
 

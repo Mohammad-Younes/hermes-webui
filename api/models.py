@@ -1270,7 +1270,7 @@ class Session:
             'parent_session_id',
             'worktree_path', 'worktree_branch', 'worktree_repo_root', 'worktree_created_at',
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label', 'read_only',
-            'enabled_toolsets', 'composer_draft', 'anchor_activity_scenes',
+            'enabled_toolsets', 'composer_draft',
             'process_wakeup_pause',
             'share_token', 'share_created_at',
         ]
